@@ -1,87 +1,109 @@
 /**
  * ** 概要 **
  * リンクを自動更新するスクリプトです
+ * https://twitter.com/peprintenpa/status/1361132929678667787 を参照しました
  *
  * ** 動作 **
  * 1. リンクが変更されたことを検知します
  * 2. ダイアログを出して，リンクを更新するか確認します
  * 3. ダイアログでの許可があれば更新します
  * 4. ダイアログのチェックボックスをチェックすると，以降は2を省略します
- *
- * ** 注意 **
- * リンクを更新しなかった場合，同じリンクに対してダイアログが複数回出ます
  */
 
 // @target 'indesign'
 // @targetengine 'updateLinks'
 
+/**
+ * 「再表示しない」ボックスがついた確認ダイアログのクラス
+ */
+var Confirmer = (function () {
+  var Confirmer = function () {
+    // newをつけ忘れた場合に備えて
+    if (!(this instanceof Confirmer)) {
+      return new Confirmer();
+    }
+    this.shouldConfirm = true; // 確認ダイアログを表示するかどうか
+    this.result = false; // 確認の結果
+  };
+
+  /**
+   * 確認の結果を返す。必要に応じて確認ダイアログを表示する
+   * @param {string} body ダイアログの本文
+   * @param {string} [title="重要な確認事項があります"] （省略可）ダイアログのタイトル
+   * @param {string} [yesBtnTxt="はい"] （省略可）承諾ボタンのテキスト
+   * @param {string} [noBtnTxt="いいえ"] （省略可）拒否ボタンのテキスト
+   * @returns {boolean} 確認の結果
+   */
+  Confirmer.prototype.confirm = function (body, title, yesBtnTxt, noBtnTxt) {
+    if (this.shouldConfirm) {
+      // デフォルト引数
+      if (title === undefined) title = '重要な確認事項があります';
+      if (yesBtnTxt === undefined) yesBtnTxt = 'はい';
+      if (noBtnTxt === undefined) noBtnTxt = 'いいえ';
+
+      var dlg = new Window('dialog', title);
+      dlg.add('statictext', undefined, body, { multiline: true });
+
+      var btnGrp = dlg.add('group');
+      var yesBtn = btnGrp.add('button', undefined, yesBtnTxt);
+      yesBtn.onClick = function () {
+        dlg.close(1); // dlg.show()の返り値が1になる
+      };
+      var noBtn = btnGrp.add('button', undefined, noBtnTxt);
+      noBtn.onClick = function () {
+        dlg.close(0); // dlg.show()の返り値が0になる
+      };
+
+      var checkbox = dlg.add(
+        'checkbox',
+        undefined,
+        'このダイアログを再表示しない'
+      );
+      checkbox.value = false; // チェックボックスのデフォルトの値
+
+      var result = dlg.show();
+      if (result === 2) return false; // ダイアログが閉じられた場合の処理
+      this.result = result;
+      this.shouldConfirm = !checkbox.value;
+    }
+    return this.result;
+  };
+
+  return Confirmer;
+})();
+
 if (app.eventListeners.itemByName('updateLinks') !== null) {
   app.eventListeners.itemByName('updateLinks').remove();
 }
 
-var shouldConfirm = true; // 確認ダイアログを出すかどうか
-var shouldUpdate = false; // リンクを更新するかどうか
-var listener = app.addEventListener('afterLinksChanged', function (ev) {
-  var linkList = ev.target.links;
-  var lenLink = linkList.length;
-  for (var i = lenLink - 1; i >= 0; i--) {
-    var currentLink = linkList[i];
-    if (currentLink.status === LinkStatus.LINK_OUT_OF_DATE) {
-      if (shouldConfirm) {
-        var flags = myConfirm(
-          '未更新リンクの更新',
-          currentLink.name + 'が変更されています。更新しますか？',
-          '更新する',
-          '更新しない',
-          'このダイアログを再度表示しない'
-        );
-        // ダイアログが閉じられた場合はflags===nullになる
-        if (flags) {
-          if (flags[0]) {
-            currentLink.update();
-          }
-          if (flags[1]) {
-            shouldConfirm = false;
-            shouldUpdate = flags[0];
-          }
-        }
-      } else {
-        if (shouldUpdate) {
-          currentLink.update();
-        }
-      }
-    }
+var tgtLink; // BridgeTalkから実行できるようにグローバル変数として定義
+var linkConfirmer = new Confirmer();
+var listener = app.addEventListener('afterAttributeChanged', function (ev) {
+  if (
+    ev.target.reflect.name === 'Link' &&
+    ev.target.status === LinkStatus.LINK_OUT_OF_DATE
+  ) {
+    tgtLink = ev.target;
+    var shouldUpdate = linkConfirmer.confirm(
+      'リンク「' + tgtLink.name + '」が変更されています。更新しますか？',
+      '未更新のリンクがあります',
+      '更新する',
+      '更新しない'
+    );
+    // afterAttributeChangedイベントリスナー内からev.target.update()ができないので
+    // リスナー外のBridgeTalkから実行する
+    if (shouldUpdate) executeByBridgetalk('tgtLink.update();');
   }
 });
 listener.name = 'updateLinks';
 
 /**
- * 「再度表示しない」ボックス付きのconfirmダイアログ
- * @param {string} title
- * @param {string} staticTxt
- * @param {string} yesBtnTxt
- * @param {string} noBtnTxt
- * @param {string} checkboxTxt
- * @returns {Array<boolean>} [result, checkbox.value]
+ * BridgeTalkからこの名前空間にスクリプトを実行する
+ * @param {string} script 実行するスクリプト
  */
-function myConfirm(title, staticTxt, yesBtnTxt, noBtnTxt, checkboxTxt) {
-  var dlg = new Window('dialog', title);
-  dlg.add('statictext', undefined, staticTxt, { multiline: true });
-
-  var btnGrp = dlg.add('group');
-  var yesBtn = btnGrp.add('button', undefined, yesBtnTxt);
-  yesBtn.onClick = function () {
-    dlg.close(1);
-  };
-  var noBtn = btnGrp.add('button', undefined, noBtnTxt);
-  noBtn.onClick = function () {
-    dlg.close(0);
-  };
-
-  var checkbox = dlg.add('checkbox', undefined, checkboxTxt);
-  checkbox.value = false; // チェックボックスのデフォルトの値
-
-  var result = dlg.show();
-  if (result === 2) return null; // ダイアログが閉じられた場合
-  return [result, checkbox.value];
+function executeByBridgetalk(script) {
+  var bt = new BridgeTalk();
+  bt.target = BridgeTalk.appSpecifier + '#updateLinks';
+  bt.body = script;
+  bt.send();
 }
