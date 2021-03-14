@@ -17,39 +17,46 @@
  * 「再表示しない」ボックスがついた確認ダイアログのクラス
  */
 var Confirmer = (function () {
-  var Confirmer = function () {
+  /**
+   * コンストラクタ
+   * @param {string} [title="重要な確認事項があります"] （省略可）ダイアログのタイトル
+   * @param {string} [yesBtnTxt="はい"] （省略可）承諾ボタンのテキスト
+   * @param {string} [noBtnTxt="いいえ"] （省略可）拒否ボタンのテキスト
+   */
+  var Confirmer = function (title, yesBtnTxt, noBtnTxt) {
     // newをつけ忘れた場合に備えて
     if (!(this instanceof Confirmer)) {
       return new Confirmer();
     }
     this.shouldConfirm = true; // 確認ダイアログを表示するかどうか
     this.result = false; // 確認の結果
+
+    // デフォルト引数
+    if (title === undefined) title = '重要な確認事項があります';
+    if (yesBtnTxt === undefined) yesBtnTxt = 'はい';
+    if (noBtnTxt === undefined) noBtnTxt = 'いいえ';
+
+    this.title = title;
+    this.yesBtnTxt = yesBtnTxt;
+    this.noBtnTxt = noBtnTxt;
   };
 
   /**
    * 確認の結果を返す。必要に応じて確認ダイアログを表示する
    * @param {string} body ダイアログの本文
-   * @param {string} [title="重要な確認事項があります"] （省略可）ダイアログのタイトル
-   * @param {string} [yesBtnTxt="はい"] （省略可）承諾ボタンのテキスト
-   * @param {string} [noBtnTxt="いいえ"] （省略可）拒否ボタンのテキスト
    * @returns {boolean} 確認の結果
    */
-  Confirmer.prototype.confirm = function (body, title, yesBtnTxt, noBtnTxt) {
+  Confirmer.prototype.confirmIfNeed = function (body) {
     if (this.shouldConfirm) {
-      // デフォルト引数
-      if (title === undefined) title = '重要な確認事項があります';
-      if (yesBtnTxt === undefined) yesBtnTxt = 'はい';
-      if (noBtnTxt === undefined) noBtnTxt = 'いいえ';
-
-      var dlg = new Window('dialog', title);
+      var dlg = new Window('dialog', this.title);
       dlg.add('statictext', undefined, body, { multiline: true });
 
       var btnGrp = dlg.add('group');
-      var yesBtn = btnGrp.add('button', undefined, yesBtnTxt);
+      var yesBtn = btnGrp.add('button', undefined, this.yesBtnTxt);
       yesBtn.onClick = function () {
         dlg.close(1); // dlg.show()の返り値が1になる
       };
-      var noBtn = btnGrp.add('button', undefined, noBtnTxt);
+      var noBtn = btnGrp.add('button', undefined, this.noBtnTxt);
       noBtn.onClick = function () {
         dlg.close(0); // dlg.show()の返り値が0になる
       };
@@ -77,18 +84,19 @@ if (app.eventListeners.itemByName('updateLinks') !== null) {
 }
 
 var tgtLink; // BridgeTalkから実行できるようにグローバル変数として定義
-var linkConfirmer = new Confirmer();
+var linkConfirmer = new Confirmer(
+  '未更新のリンクがあります',
+  '更新する',
+  '更新しない'
+);
 var listener = app.addEventListener('afterAttributeChanged', function (ev) {
   if (
     ev.target.reflect.name === 'Link' &&
     ev.target.status === LinkStatus.LINK_OUT_OF_DATE
   ) {
     tgtLink = ev.target;
-    var shouldUpdate = linkConfirmer.confirm(
-      'リンク「' + tgtLink.name + '」が変更されています。更新しますか？',
-      '未更新のリンクがあります',
-      '更新する',
-      '更新しない'
+    var shouldUpdate = linkConfirmer.confirmIfNeed(
+      'リンク「' + tgtLink.name + '」が変更されています。更新しますか？'
     );
     // afterAttributeChangedイベントリスナー内からev.target.update()ができないので
     // リスナー外のBridgeTalkから実行する
